@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: yohe-oha-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: yohe_user
+      POSTGRES_PASSWORD: yohe_dev_password
+      POSTGRES_DB: yohe_oha
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
