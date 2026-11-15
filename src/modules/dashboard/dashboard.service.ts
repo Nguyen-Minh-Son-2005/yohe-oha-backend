@@ -12,6 +12,7 @@ import { QuantitativeLog } from '../../entities/quantitative-log.entity';
 import { DailyProgress } from '../../entities/daily-progress.entity';
 import { SystemMessage } from '../../entities/system-message.entity';
 import { SystemConfig } from '../../entities/system-config.entity';
+import { UserProfile } from '../../entities/user-profile.entity';
 
 @Injectable()
 export class DashboardService {
@@ -30,14 +31,16 @@ export class DashboardService {
     private messageRepository: Repository<SystemMessage>,
     @InjectRepository(SystemConfig)
     private configRepository: Repository<SystemConfig>,
+    @InjectRepository(UserProfile)
+    private profileRepository: Repository<UserProfile>,
   ) {}
 
   async getTodayDashboard(userId: string) {
     const today = new Date().toISOString().split('T')[0];
     const now = new Date();
 
-    // 1. Get dynamic message from system_messages
-    const message = await this.getRandomMessage(now);
+    // 1. Get dynamic message from system_messages (context-aware with user schedule)
+    const message = await this.getRandomMessage(userId, now);
 
     // 2. Get Quantitative Tasks (Water & Steps)
     const quantitativeTasks = await this.quantTaskRepository.find({
@@ -367,15 +370,67 @@ export class DashboardService {
     return h * 60 + m;
   }
 
-  private async getRandomMessage(now: Date) {
+  private async getRandomMessage(userId: string, now: Date) {
     const hour = now.getHours();
+    const min = now.getMinutes();
+    const currentMins = hour * 60 + min;
+    const currentTimeStr = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+
     let slot = 'ALL';
-    if (hour >= 5 && hour < 11.5) {
-      slot = 'MORNING';
-    } else if (hour >= 11.5 && hour < 18) {
-      slot = 'AFTERNOON';
-    } else {
-      slot = 'EVENING';
+    let greeting = 'Chào bạn!';
+
+    // 1. Check user schedule context (work hours & post-bedtime)
+    const profile = await this.profileRepository.findOne({ where: { userId } });
+    if (profile) {
+      const workStartMins = profile.workStartTime ? this.toMinutes(profile.workStartTime) : null;
+      const workEndMins = profile.workEndTime ? this.toMinutes(profile.workEndTime) : null;
+      const sleepMins = profile.sleepTime ? this.toMinutes(profile.sleepTime) : null;
+      const wakeMins = profile.wakeTime ? this.toMinutes(profile.wakeTime) : null;
+
+      // Check post-bedtime: from sleepTime until wakeTime
+      let isPostSleep = false;
+      if (sleepMins !== null && wakeMins !== null) {
+        if (sleepMins > wakeMins) {
+          isPostSleep = currentMins >= sleepMins || currentMins < wakeMins;
+        } else {
+          isPostSleep = currentMins >= sleepMins && currentMins < wakeMins;
+        }
+      } else if (sleepMins !== null) {
+        isPostSleep = currentMins >= sleepMins;
+      }
+
+      // Check working/study hours
+      let isWorking = false;
+      if (workStartMins !== null && workEndMins !== null) {
+        if (workStartMins <= workEndMins) {
+          isWorking = currentMins >= workStartMins && currentMins <= workEndMins;
+        } else {
+          isWorking = currentMins >= workStartMins || currentMins <= workEndMins;
+        }
+      }
+
+      // Priority: Post-bedtime > Working
+      if (isPostSleep) {
+        slot = 'POST_SLEEP';
+        greeting = 'Đã khuya rồi đấy!';
+      } else if (isWorking) {
+        slot = 'WORKING';
+        greeting = 'Tập trung làm việc nhé!';
+      }
+    }
+
+    // 2. Fallback to time-of-day if not in a schedule-specific slot
+    if (slot === 'ALL') {
+      if (hour >= 5 && hour < 11.5) {
+        slot = 'MORNING';
+        greeting = 'Chào buổi sáng!';
+      } else if (hour >= 11.5 && hour < 18) {
+        slot = 'AFTERNOON';
+        greeting = 'Chào buổi chiều!';
+      } else {
+        slot = 'EVENING';
+        greeting = 'Chào buổi tối!';
+      }
     }
 
     const messages = await this.messageRepository.find({
@@ -384,21 +439,19 @@ export class DashboardService {
 
     if (messages.length === 0) {
       return {
-        greeting: 'Chào bạn!',
-        content: 'Chúc bạn một ngày tràn đầy năng lượng và sống khỏe mỗi ngày!',
+        greeting,
+        content: `Bây giờ đã là ${currentTimeStr}, chúc bạn luôn duy trì lối sống lành mạnh!`,
       };
     }
 
     const random = messages[Math.floor(Math.random() * messages.length)];
-    let greeting = 'Chào bạn!';
-    if (slot === 'MORNING') greeting = 'Chào buổi sáng!';
-    else if (slot === 'AFTERNOON') greeting = 'Chào buổi chiều!';
-    else if (slot === 'EVENING') greeting = 'Chào buổi tối!';
+    const formattedContent = random.content.replace(/\{time\}|\{currentTime\}/g, currentTimeStr);
 
     return {
       greeting,
-      content: random.content,
+      content: formattedContent,
       category: random.category,
+      timeSlot: slot,
     };
   }
 }

@@ -94,3 +94,96 @@ describe('Health Metrics Calculation Logic', () => {
     expect(bmr).toBe(1229);
   });
 });
+
+describe('Contextual Message & Schedule Awareness Logic', () => {
+  function toMinutes(timeStr: string): number {
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  function resolveMessageSlot(
+    timeStr: string,
+    profile?: {
+      workStartTime?: string;
+      workEndTime?: string;
+      sleepTime?: string;
+      wakeTime?: string;
+    },
+  ) {
+    const currentMins = toMinutes(timeStr);
+    const hour = parseInt(timeStr.split(':')[0], 10);
+
+    let slot = 'ALL';
+
+    if (profile) {
+      const workStartMins = profile.workStartTime ? toMinutes(profile.workStartTime) : null;
+      const workEndMins = profile.workEndTime ? toMinutes(profile.workEndTime) : null;
+      const sleepMins = profile.sleepTime ? toMinutes(profile.sleepTime) : null;
+      const wakeMins = profile.wakeTime ? toMinutes(profile.wakeTime) : null;
+
+      let isPostSleep = false;
+      if (sleepMins !== null && wakeMins !== null) {
+        if (sleepMins > wakeMins) {
+          isPostSleep = currentMins >= sleepMins || currentMins < wakeMins;
+        } else {
+          isPostSleep = currentMins >= sleepMins && currentMins < wakeMins;
+        }
+      }
+
+      let isWorking = false;
+      if (workStartMins !== null && workEndMins !== null) {
+        if (workStartMins <= workEndMins) {
+          isWorking = currentMins >= workStartMins && currentMins <= workEndMins;
+        } else {
+          isWorking = currentMins >= workStartMins || currentMins <= workEndMins;
+        }
+      }
+
+      if (isPostSleep) {
+        slot = 'POST_SLEEP';
+      } else if (isWorking) {
+        slot = 'WORKING';
+      }
+    }
+
+    if (slot === 'ALL') {
+      if (hour >= 5 && hour < 11.5) slot = 'MORNING';
+      else if (hour >= 11.5 && hour < 18) slot = 'AFTERNOON';
+      else slot = 'EVENING';
+    }
+
+    return slot;
+  }
+
+  const userProfile = {
+    workStartTime: '08:00',
+    workEndTime: '17:00',
+    sleepTime: '23:00',
+    wakeTime: '06:30',
+  };
+
+  it('should resolve to WORKING when user is inside work/study hours', () => {
+    const slot = resolveMessageSlot('10:30', userProfile);
+    expect(slot).toBe('WORKING');
+  });
+
+  it('should resolve to POST_SLEEP when user opens app after bedtime', () => {
+    const slot1 = resolveMessageSlot('23:35', userProfile);
+    expect(slot1).toBe('POST_SLEEP');
+
+    const slot2 = resolveMessageSlot('01:15', userProfile);
+    expect(slot2).toBe('POST_SLEEP');
+  });
+
+  it('should resolve to AFTERNOON when outside work hours in the afternoon', () => {
+    const slot = resolveMessageSlot('17:45', userProfile);
+    expect(slot).toBe('AFTERNOON');
+  });
+
+  it('should replace {time} placeholder with formatted time', () => {
+    const template = 'Bây giờ đã là {time}, bạn hãy đảm bảo ngủ đủ giấc nhé!';
+    const timeStr = '23:45';
+    const result = template.replace(/\{time\}|\{currentTime\}/g, timeStr);
+    expect(result).toBe('Bây giờ đã là 23:45, bạn hãy đảm bảo ngủ đủ giấc nhé!');
+  });
+});

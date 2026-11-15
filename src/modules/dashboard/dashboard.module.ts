@@ -7,6 +7,7 @@ import { QuantitativeLog } from '../../entities/quantitative-log.entity';
 import { DailyProgress } from '../../entities/daily-progress.entity';
 import { SystemMessage } from '../../entities/system-message.entity';
 import { SystemConfig } from '../../entities/system-config.entity';
+import { UserProfile } from '../../entities/user-profile.entity';
 import { DashboardService } from './dashboard.service';
 import { DashboardController } from './dashboard.controller';
 
@@ -20,6 +21,7 @@ import { DashboardController } from './dashboard.controller';
       DailyProgress,
       SystemMessage,
       SystemConfig,
+      UserProfile,
     ]),
   ],
   controllers: [DashboardController],
